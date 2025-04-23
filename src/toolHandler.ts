@@ -57,15 +57,17 @@ export function resetBrowserState() {
   page = undefined;
   currentBrowserType = 'chromium';
 }
+
 /**
  * Sets the provided page to the global page variable
  * @param newPage The Page object to set as the global page
  */
 export function setGlobalPage(newPage: Page): void {
   page = newPage;
-  page.bringToFront();// Bring the new tab to the front
+  page.bringToFront(); // Bring the new tab to the front
   console.log("Global page has been updated.");
 }
+
 // Tool instances
 let screenshotTool: ScreenshotTool;
 let navigationTool: NavigationTool;
@@ -89,14 +91,12 @@ let putRequestTool: PutRequestTool;
 let patchRequestTool: PatchRequestTool;
 let deleteRequestTool: DeleteRequestTool;
 
-// Add these variables at the top with other tool declarations
 let goBackTool: GoBackTool;
 let goForwardTool: GoForwardTool;
 let dragTool: DragTool;
 let pressKeyTool: PressKeyTool;
 let saveAsPdfTool: SaveAsPdfTool;
 let clickAndSwitchTabTool: ClickAndSwitchTabTool;
-
 
 interface BrowserSettings {
   viewport?: {
@@ -105,16 +105,15 @@ interface BrowserSettings {
   };
   userAgent?: string;
   headless?: boolean;
-  browserType?: 'chromium' | 'firefox' | 'webkit';
+  webSocketDebuggerUrl?: string; // Added for CDP connection
 }
 
-async function registerConsoleMessage(page) {
+async function registerConsoleMessage(page: Page) {
   page.on("console", (msg) => {
     if (consoleLogsTool) {
       const type = msg.type();
       const text = msg.text();
 
-      // "Unhandled Rejection In Promise" we injected
       if (text.startsWith("[Playwright]")) {
         const payload = text.replace("[Playwright]", "");
         consoleLogsTool.registerConsoleMessage("exception", payload);
@@ -124,7 +123,6 @@ async function registerConsoleMessage(page) {
     }
   });
 
-  // Uncaught exception
   page.on("pageerror", (error) => {
     if (consoleLogsTool) {
       const message = error.message;
@@ -133,7 +131,6 @@ async function registerConsoleMessage(page) {
     }
   });
 
-  // Unhandled rejection in promise
   await page.addInitScript(() => {
     window.addEventListener("unhandledrejection", (event) => {
       const reason = event.reason;
@@ -142,14 +139,13 @@ async function registerConsoleMessage(page) {
           : String(reason);
 
       const stack = reason?.stack || "";
-      // Use console.error get "Unhandled Rejection In Promise"
       console.error(`[Playwright][Unhandled Rejection In Promise] ${message}\n${stack}`);
     });
   });
 }
 
 /**
- * Ensures a browser is launched and returns the page
+ * Ensures a browser is connected via CDP and returns the page
  */
 async function ensureBrowser(browserSettings?: BrowserSettings) {
   try {
@@ -159,54 +155,27 @@ async function ensureBrowser(browserSettings?: BrowserSettings) {
       try {
         await browser.close().catch(err => console.error("Error closing disconnected browser:", err));
       } catch (e) {
-        // Ignore errors when closing disconnected browser
+        // Ignore errors
       }
-      // Reset browser and page references
       resetBrowserState();
     }
 
-    // Launch new browser if needed
+    // Connect to browser via CDP if needed
     if (!browser) {
-      const { viewport, userAgent, headless = false, browserType = 'chromium' } = browserSettings ?? {};
+      const { viewport, userAgent, headless = false, webSocketDebuggerUrl = 'http://localhost:9222' } = browserSettings ?? {};
       
-      // If browser type is changing, force a new browser instance
-      if (browser && currentBrowserType !== browserType) {
-        try {
-          await browser.close().catch(err => console.error("Error closing browser on type change:", err));
-        } catch (e) {
-          // Ignore errors
-        }
-        resetBrowserState();
-      }
+      console.error(`Connecting to Chromium browser via CDP at ${webSocketDebuggerUrl}...`);
       
-      console.error(`Launching new ${browserType} browser instance...`);
-      
-      // Use the appropriate browser engine
-      let browserInstance;
-      switch (browserType) {
-        case 'firefox':
-          browserInstance = firefox;
-          break;
-        case 'webkit':
-          browserInstance = webkit;
-          break;
-        case 'chromium':
-        default:
-          browserInstance = chromium;
-          break;
-      }
-      
-      browser = await browserInstance.launch({ headless });
-      currentBrowserType = browserType;
+      browser = await chromium.connectOverCDP(webSocketDebuggerUrl);
+      currentBrowserType = 'chromium'; // CDP is Chrome-specific
 
       // Add cleanup logic when browser is disconnected
       browser.on('disconnected', () => {
         console.error("Browser disconnected event triggered");
-        browser = undefined;
-        page = undefined;
+        resetBrowserState();
       });
 
-      const context = await browser.newContext({
+      const context = browser.contexts()[0] || await browser.newContext({
         ...userAgent && { userAgent },
         viewport: {
           width: viewport?.width ?? 1280,
@@ -224,7 +193,6 @@ async function ensureBrowser(browserSettings?: BrowserSettings) {
     // Verify page is still valid
     if (!page || page.isClosed()) {
       console.error("Page is closed or invalid. Creating new page...");
-      // Create a new page if the current one is invalid
       const context = browser.contexts()[0] || await browser.newContext();
       page = await context.newPage();
       
@@ -234,7 +202,7 @@ async function ensureBrowser(browserSettings?: BrowserSettings) {
     
     return page!;
   } catch (error) {
-    console.error("Error ensuring browser:", error);
+    console.error("Error ensuring browser via CDP:", error);
     // If something went wrong, clean up completely and retry once
     try {
       if (browser) {
@@ -246,34 +214,18 @@ async function ensureBrowser(browserSettings?: BrowserSettings) {
     
     resetBrowserState();
     
-    // Try one more time from scratch
-    const { viewport, userAgent, headless = false, browserType = 'chromium' } = browserSettings ?? {};
+    // Retry CDP connection
+    const { viewport, userAgent, headless = false, webSocketDebuggerUrl = 'http://localhost:9222' } = browserSettings ?? {};
     
-    // Use the appropriate browser engine
-    let browserInstance;
-    switch (browserType) {
-      case 'firefox':
-        browserInstance = firefox;
-        break;
-      case 'webkit':
-        browserInstance = webkit;
-        break;
-      case 'chromium':
-      default:
-        browserInstance = chromium;
-        break;
-    }
-    
-    browser = await browserInstance.launch({ headless });
-    currentBrowserType = browserType;
+    browser = await chromium.connectOverCDP(webSocketDebuggerUrl);
+    currentBrowserType = 'chromium';
     
     browser.on('disconnected', () => {
       console.error("Browser disconnected event triggered (retry)");
-      browser = undefined;
-      page = undefined;
+      resetBrowserState();
     });
 
-    const context = await browser.newContext({
+    const context = browser.contexts()[0] || await browser.newContext({
       ...userAgent && { userAgent },
       viewport: {
         width: viewport?.width ?? 1280,
@@ -407,37 +359,37 @@ export async function handleToolCall(
       resetBrowserState();
     }
 
-  // Prepare context based on tool requirements
-  const context: ToolContext = {
-    server
-  };
-  
-  // Set up browser if needed
-  if (BROWSER_TOOLS.includes(name)) {
-    const browserSettings = {
-      viewport: {
-        width: args.width,
-        height: args.height
-      },
-      userAgent: name === "playwright_custom_user_agent" ? args.userAgent : undefined,
-      headless: args.headless,
-      browserType: args.browserType || 'chromium'
+    // Prepare context based on tool requirements
+    const context: ToolContext = {
+      server
     };
     
-    try {
-      context.page = await ensureBrowser(browserSettings);
-      context.browser = browser;
-    } catch (error) {
-      console.error("Failed to ensure browser:", error);
-      return {
-        content: [{
-          type: "text",
-          text: `Failed to initialize browser: ${(error as Error).message}. Please try again.`,
-        }],
-        isError: true,
+    // Set up browser if needed
+    if (BROWSER_TOOLS.includes(name)) {
+      const browserSettings: BrowserSettings = {
+        viewport: {
+          width: args.width,
+          height: args.height
+        },
+        userAgent: name === "playwright_custom_user_agent" ? args.userAgent : undefined,
+        headless: args.headless,
+        webSocketDebuggerUrl: args.webSocketDebuggerUrl // Pass CDP URL
       };
+      
+      try {
+        context.page = await ensureBrowser(browserSettings);
+        context.browser = browser;
+      } catch (error) {
+        console.error("Failed to ensure browser:", error);
+        return {
+          content: [{
+            type: "text",
+            text: `Failed to initialize browser: ${(error as Error).message}. Please try again.`,
+          }],
+          isError: true,
+        };
+      }
     }
-  }
 
     // Set up API context if needed
     if (API_TOOLS.includes(name)) {
