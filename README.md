@@ -6,7 +6,6 @@ A simple Model Context Protocol (MCP) server for browser and API automation usin
 - Automate browsers (Chromium, Firefox, WebKit) via Playwright
 - API testing tools (GET, POST, etc)
 - Console log and screenshot capture
-- Supports CDP (Chrome DevTools Protocol) connection
 
 ## Quick Start
 
@@ -20,7 +19,7 @@ A simple Model Context Protocol (MCP) server for browser and API automation usin
    ```
 3. **Start Chrome in CDP mode**
    ```sh
-   "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222"
+   "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
    ```
 4. **Start the server**
    ```sh
@@ -29,7 +28,7 @@ A simple Model Context Protocol (MCP) server for browser and API automation usin
 
 ## Usage
 - Connect via MCP client or Claude Desktop
-- See `docs/` for tool details and examples
+- See the `docs/` folder for details and examples
 
 ## Test
 ```sh
@@ -51,6 +50,3 @@ node run-tests.cjs
 ```
 
 Replace `<your-user>` with your Windows username.
-
----
-MIT License
